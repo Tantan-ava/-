@@ -130,19 +130,29 @@ class MonthlyComboAllMarketBacktester:
     
     def _calculate_ep_signal(self, date_idx):
         """
-        计算EP价值信号
-        
-        使用过去12个月的平均收益作为EP代理（简化处理）
-        实际应用中应从财务数据计算EP
+        计算价值因子信号
+
+        从价值因子数据文件加载
         """
         if date_idx < 12:
             return pd.Series(0, index=self.monthly_returns.columns)
-        
-        # 使用过去12个月收益的均值作为价值代理
+
+        # 加载价值因子数据
+        vf_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'processed', 'value_factor.parquet')
+        if os.path.exists(vf_path):
+            vf = pd.read_parquet(vf_path)
+            vf.index = pd.to_datetime(vf.index)
+            current_date = self.monthly_returns.index[date_idx]
+            if current_date in vf.index:
+                return vf.loc[current_date].dropna()
+            # 找最近的日期
+            valid_dates = vf.index[vf.index <= current_date]
+            if len(valid_dates) > 0:
+                return vf.loc[valid_dates[-1]].dropna()
+
+        # 回退：使用过去12个月收益均值
         period_returns = self.monthly_returns.iloc[date_idx-12:date_idx]
-        ep_proxy = period_returns.mean()
-        
-        return ep_proxy.dropna()
+        return period_returns.mean().dropna()
     
     def _standardize(self, signal):
         """Winsorization + Z-score标准化"""

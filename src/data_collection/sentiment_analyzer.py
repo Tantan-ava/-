@@ -219,7 +219,7 @@ class PolicySentimentAnalyzer:
             else:
                 sentiment_score = group['sentiment_compound'].mean()
             
-            # VIX代理：情绪波动的标准差
+            # VIX指标：情绪波动的标准差
             vix_proxy = group['sentiment_compound'].std() if len(group) > 1 else 0
             
             # 冲击信号

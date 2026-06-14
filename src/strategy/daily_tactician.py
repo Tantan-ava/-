@@ -38,13 +38,13 @@ class DailyTactician:
         self.sentiment = sentiment_data.copy()
         self.use_shock_signal = use_shock_signal
         
-        # 计算情绪分数的Z-score
+        # 计算情绪分数的Z-score（使用扩展窗口+shift(1)严格避免前视偏差）
+        score = self.sentiment['sentiment_score']
         self.sentiment['sentiment_zscore'] = (
-            (self.sentiment['sentiment_score'] - self.sentiment['sentiment_score'].mean()) /
-            self.sentiment['sentiment_score'].std()
+            (score - score.expanding().mean().shift(1)) / score.expanding().std().shift(1)
         )
         
-        # 阈值校准（基于情绪历史分布）
+        # 阈值校准（基于情绪历史分布，使用扩展窗口+shift(1)严格避免前视偏差）
         self.thresholds = self._calibrate_thresholds()
         
     def _calibrate_thresholds(self):
@@ -54,25 +54,23 @@ class DailyTactician:
         优化说明：
         - 原阈值基于标准正态分布理论值（±1, ±2）
         - 实际情绪数据分布不同，需要根据实际数据调整
-        - 使用百分位数确保各状态触发频率合理
+        - 使用扩展窗口百分位数+shift(1)严格避免前视偏差
         
         Returns:
         --------
-        dict: 阈值配置
+        pd.DataFrame: 阈值配置，index=date, columns=阈值名称
         """
         z = self.sentiment['sentiment_zscore']
         
-        # 基于实际数据分布的百分位阈值（优化后）
-        # P5: 极端恐慌，P20: 恐慌，P40: 中性下限
-        # P60: 中性上限，P80: 乐观，P95: 极端乐观
-        return {
-            'extreme_panic': np.percentile(z, 5),    # P5: 极度恐慌，超配150%
-            'panic': np.percentile(z, 20),            # P20: 恐慌，超配120%
-            'neutral_low': np.percentile(z, 40),      # P40: 中性下限
-            'neutral_high': np.percentile(z, 60),     # P60: 中性上限
-            'optimistic': np.percentile(z, 80),       # P80: 乐观，减仓80%
-            'extreme_greed': np.percentile(z, 95),    # P95: 极度乐观，大幅减仓50%
-        }
+        # 使用扩展窗口百分位数+shift(1)，确保每个时点只使用历史数据（不含当日）
+        thresholds = pd.DataFrame(index=z.index)
+        thresholds['extreme_panic'] = z.expanding().quantile(0.05).shift(1)
+        thresholds['panic'] = z.expanding().quantile(0.20).shift(1)
+        thresholds['neutral_low'] = z.expanding().quantile(0.40).shift(1)
+        thresholds['neutral_high'] = z.expanding().quantile(0.60).shift(1)
+        thresholds['optimistic'] = z.expanding().quantile(0.80).shift(1)
+        thresholds['extreme_greed'] = z.expanding().quantile(0.95).shift(1)
+        return thresholds
     
     def get_position_scalar(self, date):
         """
@@ -106,7 +104,8 @@ class DailyTactician:
             # 无情绪数据（周末/节假日），返回中性
             return 1.0, 'no_data', 0.0
         
-        t = self.thresholds
+        # 使用当日对应的扩展窗口阈值（避免前视偏差）
+        t = self.thresholds.loc[date]
         
         # 结合冲击信号调整
         shock_adjustment = 0
@@ -115,6 +114,10 @@ class DailyTactician:
             shock_adjustment = shock * 0.3  # -0.6, 0, +0.6
         
         adjusted_z = sentiment_z + shock_adjustment
+        
+        # 如果阈值尚未计算完成（历史数据不足），返回中性持仓
+        if pd.isna(t['extreme_panic']) or pd.isna(t['extreme_greed']):
+            return 1.0, 'insufficient_history', sentiment_score
         
         # 仓位决策逻辑
         if adjusted_z < t['extreme_panic']:

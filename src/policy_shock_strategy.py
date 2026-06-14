@@ -174,7 +174,7 @@ class PolicyShockStrategy:
         sentiment_score : float
             情绪分数
         vix_proxy : float
-            VIX代理（波动率）
+            VIX指标（波动率）
         
         Returns
         -------

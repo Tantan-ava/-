@@ -816,10 +816,12 @@ ann_ret_base, sharpe_base, max_dd_base, _ = calculate_metrics(port_ret)
 annual_turnover_base = monthly_turnover.mean() * 12 * 100
 print(f"基准（无过滤）: 年化收益={ann_ret_base*100:.2f}%, 夏普={sharpe_base:.2f}")
 
-trading_activity = (df_returns != 0).sum() / len(df_returns)  # 交易活跃度 (0-1)
-price_volatility = df_returns.std()  # 价格波动性
+# 使用初始24个月数据计算流动性指标，避免全样本前视偏差
+initial_window = df_returns.iloc[:24]
+trading_activity = (initial_window != 0).sum() / len(initial_window)  # 交易活跃度 (0-1)
+price_volatility = initial_window.std()  # 价格波动性（基于历史窗口）
 # 模拟日均交易额：交易活跃度高且波动适中的股票流动性更好
-# 使用 trading_activity / (volatility + epsilon) 作为流动性的代理
+# 使用 trading_activity / (volatility + epsilon) 作为流动性指标
 simulated_daily_volume = trading_activity / (price_volatility + 1e-6)
 
 # 排除模拟日均交易额最低的15%（对应日均交易额<5000万的低流动性股票）
